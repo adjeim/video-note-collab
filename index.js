@@ -21,7 +21,7 @@ app.post('/token', async (req, res) => {
   }
 
   // Get the user's identity from the request
-  const identity  = req.body.identity;
+  const identity = req.body.identity;
 
   // Create a 'grant' identifying the Sync service instance for this app.
   const syncGrant = new SyncGrant({
