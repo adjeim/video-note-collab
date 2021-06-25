@@ -14,7 +14,7 @@
           Join Video Call
         </button>
     </form>
-    <textarea id='notepad' class='h-140 w-6/12 shadow-lg border rounded-md p-3 sm:mx-auto sm:w-1/2'></textarea>
+    <textarea disabled id='notepad' class='bg-gray-200 h-140 w-6/12 shadow-lg border rounded-md p-3 sm:mx-auto sm:w-1/2'></textarea>
     <div id='container' class='w-5/12 bg-green-100'>
       <div id='participantsContainer'>
         <div id='localParticipant'>
@@ -25,178 +25,186 @@
         </div>
       </div>
     </div>
+
+    <script>
+      const notepad = document.getElementById('notepad');
+      const localVideoTrack = document.getElementById('localVideoTrack');
+      const login = document.getElementById('login');
+      const identityInput = document.getElementById('identity');
+      const joinLeaveButton = document.getElementById('joinOrLeaveRoom');
+      const localParticipant = document.getElementById('localParticipant');
+      const remoteParticipants = document.getElementById('remoteParticipants');
+
+      let connected = false;
+      let room;
+      let twilioSyncClient;
+      let syncDocument;
+
+      const addLocalVideo = async () => {
+        const videoTrack = await Twilio.Video.createLocalVideoTrack();
+        const trackElement = videoTrack.attach();
+        localVideoTrack.appendChild(trackElement);
+      };
+
+      const connectOrDisconnect = async (event) => {
+        event.preventDefault();
+        if (!connected) {
+          const identity = identityInput.value;
+          joinLeaveButton.disabled = true;
+          joinLeaveButton.innerHTML = 'Connecting...';
+
+          try {
+            await connect(identity);
+          } catch (error) {
+            console.log(error);
+            alert('Failed to connect to video room.');
+            joinLeaveButton.innerHTML = 'Join Video Call';
+            joinLeaveButton.disabled = false;
+          }
+        }
+        else {
+          disconnect();
+        }
+      };
+
+      const connect = async (identity) => {
+        const response = await fetch('/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({'identity': identity, room: 'My Video Room'})
+        });
+
+        const data = await response.json();
+        const token = data.token;
+
+        // Set up sync document
+        twilioSyncClient = new Twilio.Sync.Client(token);
+        notepad.disabled = false;
+        notepad.classList.remove('bg-gray-200');
+
+        syncDocument = await twilioSyncClient.document('notepad');
+
+        // Load the existing Document
+        notepad.value = syncDocument.data.content;
+
+        // Listen to updates on the Document
+        syncDocument.on('updated', (event) => {
+
+          // Update the cursor position
+          let cursorStartPos = notepad.selectionStart;
+          let cursorEndPos = notepad.selectionEnd;
+
+          notepad.value = event.data.content;
+
+          // Reset the cursor position
+          notepad.selectionEnd = cursorEndPos;
+
+          console.log('Received Document update event. New value:', event.data.content);
+        })
+
+        // Set up the video room
+        room = await Twilio.Video.connect(token);
+
+        const identityDiv = document.createElement('div');
+        identityDiv.setAttribute('class', 'identity');
+        identityDiv.innerHTML = identity;
+        localParticipant.appendChild(identityDiv);
+
+        room.participants.forEach(participantConnected);
+        room.on('participantConnected', participantConnected);
+        room.on('participantDisconnected', participantDisconnected);
+        connected = true;
+
+        joinLeaveButton.innerHTML = 'Leave Video Call';
+        joinLeaveButton.disabled = false;
+        identityInput.style.display = 'none';
+      };
+
+      const disconnect = () => {
+        room.disconnect();
+
+        let removeParticipants = remoteParticipants.getElementsByClassName('participant');
+
+        while (removeParticipants[0]) {
+          remoteParticipants.removeChild(removeParticipants[0]);
+        }
+
+        joinLeaveButton.innerHTML = 'Join Video Call';
+        connected = false;
+        identityInput.style.display = 'inline-block';
+        localParticipant.removeChild(localParticipant.lastElementChild);
+
+        syncDocument.close();
+        twilioSyncClient = null;
+        notepad.value = '';
+        notepad.disabled = true;
+        notepad.classList.add('bg-gray-200');
+
+      };
+
+      const participantConnected = (participant) => {
+        const participantDiv = document.createElement('div');
+        participantDiv.setAttribute('id', participant.sid);
+        participantDiv.setAttribute('class', 'participant');
+
+        const tracksDiv = document.createElement('div');
+        participantDiv.appendChild(tracksDiv);
+
+        const identityDiv = document.createElement('div');
+        identityDiv.setAttribute('class', 'identity');
+        identityDiv.innerHTML = participant.identity;
+        participantDiv.appendChild(identityDiv);
+
+        remoteParticipants.appendChild(participantDiv);
+
+        participant.tracks.forEach(publication => {
+          if (publication.isSubscribed) {
+            trackSubscribed(tracksDiv, publication.track);
+          }
+        });
+        participant.on('trackSubscribed', track => trackSubscribed(tracksDiv, track));
+        participant.on('trackUnsubscribed', trackUnsubscribed);
+      };
+
+      const participantDisconnected = (participant) => {
+        document.getElementById(participant.sid).remove();
+      };
+
+      const trackSubscribed = (div, track) => {
+        const trackElement = track.attach();
+        div.appendChild(trackElement);
+      };
+
+      const trackUnsubscribed = (track) => {
+        track.detach().forEach(element => {
+          element.remove()
+        });
+      };
+
+      const syncNotepad = (syncClient) => {
+        const notepadContent = notepad.value;
+        twilioSyncClient.document('notepad').then((doc) => {
+          doc.update({ content: notepadContent });
+        })
+      }
+
+      // Add listener
+      notepad.addEventListener('keyup', (event) => {
+
+        // Define array of triggers to sync (space, enter, and punctuation)
+        // Otherwise sync will fire every time
+        const syncKeys = [32, 13, 8, 188, 190];
+
+        if (syncKeys.includes(event.keyCode)) {
+          syncNotepad(twilioSyncClient);
+        }
+      })
+
+      login.addEventListener('submit', connectOrDisconnect);
+
+      addLocalVideo();
+    </script>
   </body>
 </html>
-
-<script>
-  const notepad = document.getElementById('notepad');
-  const localVideoTrack = document.getElementById('localVideoTrack');
-  const login = document.getElementById('login');
-  const identityInput = document.getElementById('identity');
-  const joinLeaveButton = document.getElementById('joinOrLeaveRoom');
-  const localParticipant = document.getElementById('localParticipant');
-  const remoteParticipants = document.getElementById('remoteParticipants');
-
-  let connected = false;
-  let room;
-  let twilioSyncClient;
-
-  const addLocalVideo = async () => {
-    const videoTrack = await Twilio.Video.createLocalVideoTrack();
-    const trackElement = videoTrack.attach();
-    localVideoTrack.appendChild(trackElement);
-  };
-
-  const connectOrDisconnect = async (event) => {
-    event.preventDefault();
-    if (!connected) {
-      const identity = identityInput.value;
-      joinLeaveButton.disabled = true;
-      joinLeaveButton.innerHTML = 'Connecting...';
-
-      try {
-        await connect(identity);
-      } catch (error) {
-        console.log(error);
-        alert('Failed to connect to video room.');
-        joinLeaveButton.innerHTML = 'Join Video Call';
-        joinLeaveButton.disabled = false;
-      }
-    }
-    else {
-      disconnect();
-    }
-  };
-
-
-
-  const connect = async (identity) => {
-    const response = await fetch('/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({'identity': identity, room: 'My Video Room'})
-    });
-
-    const data = await response.json();
-    const token = data.token;
-
-    // Set up sync document
-    twilioSyncClient = new Twilio.Sync.Client(token);
-
-    const syncDocument = await twilioSyncClient.document('notepad');
-
-    // Load the existing Document
-    notepad.value = syncDocument.data.content;
-
-    // Listen to updates on the Document
-    syncDocument.on('updated', (event) => {
-
-      // Update the cursor position
-      let cursorStartPos = notepad.selectionStart;
-      let cursorEndPos = notepad.selectionEnd;
-
-      notepad.value = event.data.content;
-
-      // Reset the cursor position
-      notepad.selectionEnd = cursorEndPos;
-
-      console.log('Received Document update event. New value:', event.value);
-    })
-
-    // Set up the video room
-    room = await Twilio.Video.connect(token);
-
-    const identityDiv = document.createElement('div');
-    identityDiv.setAttribute('class', 'identity');
-    identityDiv.innerHTML = identity;
-    localParticipant.appendChild(identityDiv);
-
-    room.participants.forEach(participantConnected);
-    room.on('participantConnected', participantConnected);
-    room.on('participantDisconnected', participantDisconnected);
-    connected = true;
-
-    joinLeaveButton.innerHTML = 'Leave Video Call';
-    joinLeaveButton.disabled = false;
-    identityInput.style.display = 'none';
-  };
-
-  const disconnect = () => {
-    room.disconnect();
-
-    let removeParticipants = remoteParticipants.getElementsByClassName('participant');
-
-    while (removeParticipants[0]) {
-      remoteParticipants.removeChild(removeParticipants[0]);
-    }
-
-    joinLeaveButton.innerHTML = 'Join Video Call';
-    connected = false;
-    identityInput.style.display = 'inline-block';
-    localParticipant.removeChild(localParticipant.lastElementChild);
-  };
-
-  const participantConnected = (participant) => {
-    const participantDiv = document.createElement('div');
-    participantDiv.setAttribute('id', participant.sid);
-    participantDiv.setAttribute('class', 'participant');
-
-    const tracksDiv = document.createElement('div');
-    participantDiv.appendChild(tracksDiv);
-
-    const identityDiv = document.createElement('div');
-    identityDiv.setAttribute('class', 'identity');
-    identityDiv.innerHTML = participant.identity;
-    participantDiv.appendChild(identityDiv);
-
-    remoteParticipants.appendChild(participantDiv);
-
-    participant.tracks.forEach(publication => {
-      if (publication.isSubscribed) {
-        trackSubscribed(tracksDiv, publication.track);
-      }
-    });
-    participant.on('trackSubscribed', track => trackSubscribed(tracksDiv, track));
-    participant.on('trackUnsubscribed', trackUnsubscribed);
-  };
-
-  const participantDisconnected = (participant) => {
-    document.getElementById(participant.sid).remove();
-  };
-
-  const trackSubscribed = (div, track) => {
-    const trackElement = track.attach();
-    div.appendChild(trackElement);
-  };
-
-  const trackUnsubscribed = (track) => {
-    track.detach().forEach(element => {
-      element.remove()
-    });
-  };
-
-  const syncNotepad = (syncClient) => {
-    const notepadContent = notepad.value;
-    twilioSyncClient.document('notepad').then((doc) => {
-      doc.update({ content: notepadContent });
-    })
-  }
-
-  // Add listener
-  notepad.addEventListener('keyup', (event) => {
-
-    // Define array of triggers to sync (space, enter, and punctuation)
-    // Otherwise sync will fire every time
-    const syncKeys = [32, 13, 8, 188, 190];
-
-    if (syncKeys.includes(event.keyCode)) {
-      syncNotepad(twilioSyncClient);
-    }
-  })
-
-  login.addEventListener('submit', connectOrDisconnect);
-
-  addLocalVideo();
-</script>
