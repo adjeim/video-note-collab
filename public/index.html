@@ -42,7 +42,7 @@
             // Reset the cursor position
             notepad.selectionEnd = cursorEndPos;
 
-            console.log('Received Document update event. New value:', event.value);
+            console.log('Received Document update event. New value:', event.data.content);
           })
         })
         .catch(function(error) {
@@ -68,5 +68,4 @@
       syncNotepad(twilioSyncClient);
     }
   })
-  login.addEventListener('submit', connectOrDisconnect);
 </script>
