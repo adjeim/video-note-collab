@@ -25,7 +25,7 @@
             .then(function(document) {
 
               // Load the existing Document
-              notepad.value = document.data.content;
+              notepad.value = document.data.content || '';
 
               // Listen to updates on the Document
               document.on('updated', function(event) {
