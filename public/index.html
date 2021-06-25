@@ -87,7 +87,7 @@
         syncDocument = await twilioSyncClient.document('notepad');
 
         // Load the existing Document
-        notepad.value = syncDocument.data.content;
+        notepad.value = syncDocument.data.content || '';
 
         // Listen to updates on the Document
         syncDocument.on('updated', (event) => {
